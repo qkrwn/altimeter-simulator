@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>비행 기압 고도계 시뮬레이터</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --secondary: #34495e;
+            --accent: #e74c3c;
+            --light-bg: #ecf0f1;
+            --text-color: #333;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--light-bg);
+            color: var(--text-color);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+        }
+        .container {
+            width: 100%;
+            max-width: 1250px;
+            display: grid;
+            grid-template-columns: 280px 1fr 350px;
+            gap: 20px;
+        }
+        h1 {
+            grid-column: 1 / -1;
+            text-align: center;
+            color: var(--primary);
+            margin-top: 0;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #bdc3c7;
+        }
+        .panel {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        /* 왼쪽 패널 래퍼 (하늘 + 계기판) */
+        .left-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        /* 대기 및 비행기 시각화 영역 */
+        .sky-panel {
+            position: relative;
+            height: 480px;
+            background: linear-gradient(to top, #87CEEB 0%, #0a1930 100%);
+            border-radius: 8px;
+            overflow: hidden;
+            border: 2px solid #bdc3c7;
+            display: flex;
+            justify-content: center;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.2);
+        }
+        .altitude-lines {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            pointer-events: none;
+            opacity: 0.3;
+        }
+        .line { border-bottom: 1px dashed white; width: 100%; }
+        .plane-wrapper {
+            position: absolute;
+            left: 50%;
+            transform: translateX(-50%);
+            bottom: 0%;
+            transition: bottom 0.1s linear;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .plane {
+            font-size: 40px;
+            color: white;
+            text-shadow: 0 4px 8px rgba(0,0,0,0.5);
+            transform: rotate(-90deg); /* 위를 향하도록 */
+        }
+        .plane-alt-label {
+            color: white;
+            font-size: 12px;
+            font-weight: bold;
+            background: rgba(0,0,0,0.5);
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-top: 5px;
+        }
+
+        /* 🟢 아날로그 원형 고도계 (새로 추가된 부분) */
+        .analog-altimeter {
+            background: #1a1a1a;
+            width: 220px;
+            height: 220px;
+            border-radius: 50%;
+            margin: 0 auto;
+            position: relative;
+            border: 10px solid #bdc3c7;
+            box-shadow: inset 0 0 15px black, 0 5px 10px rgba(0,0,0,0.3);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        /* 눈금 표시기 (디자인) */
+        .analog-altimeter::before {
+            content: '';
+            position: absolute;
+            width: 90%; height: 90%;
+            border-radius: 50%;
+            border: 2px dashed #555;
+            box-sizing: border-box;
+        }
+        /* 중앙 핀 */
+        .center-pin {
+            position: absolute;
+            width: 14px;
+            height: 14px;
+            background: #ecf0f1;
+            border-radius: 50%;
+            z-index: 10;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        }
+        /* 바늘 공통 속성 */
+        .needle {
+            position: absolute;
+            bottom: 50%;
+            left: 50%;
+            transform-origin: bottom center;
+            transition: transform 0.3s ease-out;
+            border-radius: 4px 4px 0 0;
+        }
+        /* 긴 바늘 (1,000m 당 1회전) */
+        .long-needle {
+            width: 4px;
+            height: 85px;
+            margin-left: -2px;
+            background: #fff;
+            z-index: 8;
+        }
+        /* 짧은 바늘 (10,000m 당 1회전) */
+        .short-needle {
+            width: 8px;
+            height: 55px;
+            margin-left: -4px;
+            background: #e74c3c;
+            z-index: 7;
+        }
+        /* 고도계 내부 텍스트 */
+        .alt-label-inner {
+            position: absolute;
+            top: 25px;
+            color: #bdc3c7;
+            font-size: 12px;
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+        .alt-window {
+            position: absolute;
+            bottom: 40px;
+            background: #000;
+            color: #0f0;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 14px;
+            border: 1px solid #333;
+        }
+        
+        /* 컨트롤 및 계기판 영역 */
+        .controls h3, .instruments h3, .constants h3 {
+            margin-top: 0;
+            color: var(--primary);
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+        .control-group {
+            margin-bottom: 20px;
+        }
+        label { font-weight: bold; display: block; margin-bottom: 8px; font-size: 14px;}
+        input[type="range"] { width: 100%; cursor: pointer; }
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            background: #f8f9fa;
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid #e0e0e0;
+        }
+        .radio-group label { margin: 0; font-weight: normal; cursor: pointer; }
+        
+        /* 디지털 계기판 디자인 */
+        .gauge {
+            background: #222;
+            color: #0f0;
+            font-family: 'Courier New', Courier, monospace;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            border: 3px solid #555;
+        }
+        .gauge-title {
+            color: #aaa;
+            font-size: 12px;
+            margin-bottom: 5px;
+        }
+        .gauge-value {
+            font-size: 24px;
+            font-weight: bold;
+            text-align: right;
+        }
+        .gauge-value span { font-size: 14px; color: #888; }
+        .gauge.error { color: #ff3333; }
+        .gauge.altimeter { color: #00ccff; border-color: #004466; }
+        
+        /* 상수 표 영역 */
+        .constant-item {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            padding: 5px 0;
+            border-bottom: 1px dashed #eee;
+        }
+        .constant-item:last-child { border: none; }
+        
+        /* 그래프 영역 */
+        .chart-container {
+            width: 100%;
+            height: 250px;
+            margin-top: 20px;
+        }
+        
+        /* 반응형 */
+        @media (max-width: 900px) {
+            .container { grid-template-columns: 1fr; }
+            .sky-panel { height: 400px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>기압 고도 공식 (등온 대기) 시뮬레이터</h1>
+
+    <div class="left-panel">
+        <div class="sky-panel" id="sky">
+            <div class="altitude-lines">
+                <div class="line" style="margin-top: 0%;"></div>
+                <div class="line" style="margin-top: 25%;"></div>
+                <div class="line" style="margin-top: 50%;"></div>
+                <div class="line" style="margin-top: 75%;"></div>
+                <div class="line" style="margin-top: 100%;"></div>
+            </div>
+            <div class="plane-wrapper" id="plane">
+                <div class="plane">✈️</div>
+                <div class="plane-alt-label" id="planeAltLabel">0 m</div>
+            </div>
+        </div>
+
+        <div class="panel" style="background: #eef2f5; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 15px;">
+            <h4 style="margin: 0 0 10px 0; color: #2c3e50;">기압 고도계 (Altimeter)</h4>
+            <div class="analog-altimeter">
+                <div class="alt-label-inner">ALTITUDE</div>
+                <div class="needle short-needle" id="analogShortNeedle"></div>
+                <div class="needle long-needle" id="analogLongNeedle"></div>
+                <div class="center-pin"></div>
+                <div class="alt-window" id="analogWindow">0 m</div>
+            </div>
+        </div>
+    </div>
+
+    <div>
+        <div class="panel instruments">
+            <h3>🛩️ 측정 결과 (디지털 수치)</h3>
+            <div class="gauge">
+                <div class="gauge-title">실제 비행 고도 (Actual Altitude)</div>
+                <div class="gauge-value" id="dispActualAlt">0 <span>m</span></div>
+            </div>
+            
+            <div class="gauge" style="color: #ff9900;">
+                <div class="gauge-title">외부 센서 측정 기압 (Measured Pressure)</div>
+                <div class="gauge-value" id="dispPressure">1013.25 <span>hPa</span></div>
+            </div>
+
+            <div class="gauge altimeter">
+                <div class="gauge-title">로그 역산 지시 고도 (Indicated Altitude)</div>
+                <div class="gauge-value" id="dispIndicatedAlt">0 <span>m</span></div>
+            </div>
+
+            <div class="gauge error" id="errorGauge">
+                <div class="gauge-title">고도계 오차 (Indicated - Actual)</div>
+                <div class="gauge-value" id="dispError">0 <span>m</span></div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h3>📈 기압-고도 그래프 (실시간)</h3>
+            <div class="chart-container">
+                <canvas id="atmosphereChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div>
+        <div class="panel controls">
+            <h3>⚙️ 환경 및 조종 컨트롤</h3>
+            <div class="control-group">
+                <label>대기 상태 선택 (난기류 스위치)</label>
+                <div class="radio-group">
+                    <label>
+                        <input type="radio" name="atmosphereMode" value="normal" checked> 
+                        🌤️ 정상 대기 (표준 모델)
+                    </label>
+                    <label>
+                        <input type="radio" name="atmosphereMode" value="turbulence"> 
+                        🌪️ 마이크로버스트 하강기류<br>
+                        <span style="font-size:12px; color:#666; margin-left:25px;">(국지적 고기압 형성: +25 hPa)</span>
+                    </label>
+                </div>
+            </div>
+            <div class="control-group">
+                <label for="altSlider">실제 비행 고도 조절: <span id="sliderValue">0</span> m</label>
+                <input type="range" id="altSlider" min="0" max="10000" step="50" value="0">
+            </div>
+        </div>
+
+        <div class="panel constants">
+            <h3>🔬 물리 상수 (Isothermal Model)</h3>
+            <div class="constant-item"><span>해수면 기압 ($P_0$)</span><span>1013.25 hPa</span></div>
+            <div class="constant-item"><span>중력가속도 ($g$)</span><span>9.80665 m/s²</span></div>
+            <div class="constant-item"><span>공기 몰질량 ($M$)</span><span>0.02896 kg/mol</span></div>
+            <div class="constant-item"><span>기체 상수 ($R$)</span><span>8.314 J/(mol·K)</span></div>
+            <div class="constant-item"><span>절대 온도 ($T$)</span><span>288.15 K (15°C)</span></div>
+            <div class="constant-item" style="border-top: 2px solid #ddd; margin-top: 5px; padding-top: 5px; font-weight: bold;">
+                <span>단순화 비례상수 ($k$)</span><span>약 0.0001185 m⁻¹</span>
+            </div>
+            <p style="font-size: 11px; color: #7f8c8d; margin-top: 15px; line-height: 1.4;">
+                * 대수적 로그함수 변환:<br> 
+                $h = -\frac{1}{k} \ln(P / P_0)$ 공식을 통해<br> 기압(독립변수)에서 고도(종속변수)를 구합니다.
+            </p>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 1. 물리 상수 정의
+    const P0 = 1013.25; 
+    const g = 9.80665;  
+    const M = 0.0289644; 
+    const R = 8.3144598; 
+    const T = 288.15; 
+    
+    // 단순화 비례상수 k 계산 (k = gM / RT)
+    const k = (g * M) / (R * T); 
+    const MAX_ALT = 10000; 
+    const TURBULENCE_PRESSURE_SPIKE = 25; 
+
+    // DOM 요소 가져오기
+    const altSlider = document.getElementById('altSlider');
+    const sliderValue = document.getElementById('sliderValue');
+    const dispActualAlt = document.getElementById('dispActualAlt');
+    const dispPressure = document.getElementById('dispPressure');
+    const dispIndicatedAlt = document.getElementById('dispIndicatedAlt');
+    const dispError = document.getElementById('dispError');
+    const errorGauge = document.getElementById('errorGauge');
+    const plane = document.getElementById('plane');
+    const planeAltLabel = document.getElementById('planeAltLabel');
+    const radioModes = document.getElementsByName('atmosphereMode');
+    
+    // 아날로그 계기판 요소
+    const analogLongNeedle = document.getElementById('analogLongNeedle');
+    const analogShortNeedle = document.getElementById('analogShortNeedle');
+    const analogWindow = document.getElementById('analogWindow');
+
+    // Chart.js 초기화 설정
+    const ctx = document.getElementById('atmosphereChart').getContext('2d');
+    
+    // 그래프용 이상적인 표준 대기 곡선 데이터 생성
+    const theoreticalData = [];
+    for(let h = 0; h <= MAX_ALT; h += 500) {
+        let p = P0 * Math.exp(-k * h);
+        theoreticalData.push({ x: h, y: p });
+    }
+
+    const chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            datasets: [
+                {
+                    label: '표준 대기 (이론값)',
+                    data: theoreticalData,
+                    borderColor: 'rgba(52, 73, 94, 0.5)',
+                    borderWidth: 2,
+                    fill: false,
+                    pointRadius: 0,
+                    tension: 0.1
+                },
+                {
+                    label: '현재 측정 기압 상태',
+                    data: [{x: 0, y: P0}],
+                    backgroundColor: '#e74c3c',
+                    borderColor: '#c0392b',
+                    pointRadius: 8,
+                    pointHoverRadius: 10,
+                    type: 'scatter'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 0 }, 
+            scales: {
+                x: {
+                    type: 'linear',
+                    position: 'bottom',
+                    title: { display: true, text: '실제 고도 (m)' },
+                    min: 0,
+                    max: MAX_ALT
+                },
+                y: {
+                    title: { display: true, text: '기압 (hPa)' },
+                    min: 200,
+                    max: 1100
+                }
+            },
+            plugins: { tooltip: { enabled: false } }
+        }
+    });
+
+    // 메인 시뮬레이션 업데이트 함수
+    function updateSimulation() {
+        const actualAlt = parseFloat(altSlider.value);
+        let mode = 'normal';
+        for(let r of radioModes) {
+            if(r.checked) mode = r.value;
+        }
+
+        // 1. 실제 대기압 계산 
+        let actualPressure = P0 * Math.exp(-k * actualAlt);
+        
+        // 2. 센서 측정 기압 산출 (난기류 스위치 작동 시)
+        let measuredPressure = actualPressure;
+        if (mode === 'turbulence') {
+            measuredPressure += TURBULENCE_PRESSURE_SPIKE; 
+        }
+
+        // 3. 고도계의 역산 (로그 함수)
+        let indicatedAlt = -(1 / k) * Math.log(measuredPressure / P0);
+        if(indicatedAlt < 0) indicatedAlt = 0; // 지면 이하 방지
+
+        // 4. 오차 계산
+        let error = indicatedAlt - actualAlt;
+
+        // UI 텍스트 업데이트
+        sliderValue.innerText = actualAlt;
+        dispActualAlt.innerHTML = `${actualAlt.toFixed(0)} <span>m</span>`;
+        dispPressure.innerHTML = `${measuredPressure.toFixed(2)} <span>hPa</span>`;
+        dispIndicatedAlt.innerHTML = `${indicatedAlt.toFixed(0)} <span>m</span>`;
+        
+        // 오차계기판 색상 처리
+        if (Math.abs(error) > 2) {
+            dispError.innerHTML = `${error.toFixed(0)} <span>m (왜곡됨)</span>`;
+            errorGauge.style.color = "#e74c3c";
+            errorGauge.style.borderColor = "#c0392b";
+            analogWindow.style.color = "#e74c3c"; // 계기판 내부 창도 붉은색으로
+        } else {
+            dispError.innerHTML = `0 <span>m (정상)</span>`;
+            errorGauge.style.color = "#00ccff";
+            errorGauge.style.borderColor = "#004466";
+            analogWindow.style.color = "#0f0";
+        }
+
+        // 비행기 위치 업데이트
+        const planePosPercent = (actualAlt / MAX_ALT) * 100;
+        plane.style.bottom = `${planePosPercent}%`;
+        planeAltLabel.innerText = `${actualAlt} m`;
+
+        // 🟢 아날로그 계기판 바늘 회전 업데이트
+        analogWindow.innerText = `${indicatedAlt.toFixed(0)} m`;
+        // 긴 바늘: 1,000m 당 360도 회전
+        const longNeedleAngle = (indicatedAlt % 1000) / 1000 * 360;
+        // 짧은 바늘: 10,000m 당 360도 회전
+        const shortNeedleAngle = (indicatedAlt / 10000) * 360;
+        
+        analogLongNeedle.style.transform = `rotate(${longNeedleAngle}deg)`;
+        analogShortNeedle.style.transform = `rotate(${shortNeedleAngle}deg)`;
+
+        // 차트 업데이트
+        chart.data.datasets[1].data = [{ x: actualAlt, y: measuredPressure }];
+        chart.update();
+    }
+
+    // 이벤트 리스너 등록
+    altSlider.addEventListener('input', updateSimulation);
+    for(let r of radioModes) {
+        r.addEventListener('change', updateSimulation);
+    }
+
+    // 초기화
+    updateSimulation();
+</script>
+</body>
+</html>
